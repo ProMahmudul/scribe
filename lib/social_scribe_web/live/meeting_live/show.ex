@@ -33,7 +33,9 @@ defmodule SocialScribeWeb.MeetingLive.Show do
       {:error, socket}
     else
       hubspot_credential = Accounts.get_user_hubspot_credential(socket.assigns.current_user.id)
-      salesforce_credential = Accounts.get_user_salesforce_credential(socket.assigns.current_user.id)
+
+      salesforce_credential =
+        Accounts.get_user_salesforce_credential(socket.assigns.current_user.id)
 
       socket =
         socket

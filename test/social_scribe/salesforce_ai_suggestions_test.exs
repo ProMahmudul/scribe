@@ -54,7 +54,12 @@ defmodule SocialScribe.SalesforceAiSuggestionsTest do
 
       ai_raw = [
         %{field: "Phone", value: "555-1234", context: "call me at 555-1234", timestamp: "01:00"},
-        %{field: "Title", value: "VP of Sales", context: "I am the VP of Sales", timestamp: "02:30"}
+        %{
+          field: "Title",
+          value: "VP of Sales",
+          context: "I am the VP of Sales",
+          timestamp: "02:30"
+        }
       ]
 
       SocialScribe.AIContentGeneratorMock
@@ -114,7 +119,8 @@ defmodule SocialScribe.SalesforceAiSuggestionsTest do
       SocialScribe.AIContentGeneratorMock
       |> expect(:generate_salesforce_suggestions, fn _meeting -> {:ok, ai_raw} end)
 
-      assert {:ok, [suggestion]} = SalesforceSuggestions.generate_suggestions_from_meeting(meeting)
+      assert {:ok, [suggestion]} =
+               SalesforceSuggestions.generate_suggestions_from_meeting(meeting)
 
       assert suggestion.field == "MailingCity"
       assert suggestion.label == "Mailing City"
