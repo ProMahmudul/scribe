@@ -9,6 +9,8 @@ defmodule SocialScribe.Accounts.UserCredential do
     field :refresh_token, :string
     field :expires_at, :utc_datetime
     field :email, :string
+    # Provider-specific metadata (e.g. Salesforce instance_url, future CRM fields).
+    field :metadata, :map, default: %{}
 
     belongs_to :user, SocialScribe.Accounts.User
 
@@ -18,13 +20,13 @@ defmodule SocialScribe.Accounts.UserCredential do
   @doc false
   def changeset(user_credential, attrs) do
     user_credential
-    |> cast(attrs, [:provider, :uid, :token, :refresh_token, :expires_at, :user_id, :email])
+    |> cast(attrs, [:provider, :uid, :token, :refresh_token, :expires_at, :user_id, :email, :metadata])
     |> validate_required([:provider, :uid, :token, :expires_at, :user_id, :email])
   end
 
   def linkedin_changeset(user_credential, attrs) do
     user_credential
-    |> cast(attrs, [:provider, :uid, :token, :refresh_token, :expires_at, :user_id, :email])
+    |> cast(attrs, [:provider, :uid, :token, :refresh_token, :expires_at, :user_id, :email, :metadata])
     |> validate_required([:provider, :uid, :token, :expires_at, :user_id, :email])
   end
 end
