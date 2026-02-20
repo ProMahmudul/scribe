@@ -1,0 +1,184 @@
+defmodule SocialScribe.SalesforceApi do
+  @moduledoc """
+  Salesforce CRM API client for contact operations.
+
+  Uses the REST API v59.0 and builds the base URL dynamically from the
+  credential's `metadata["instance_url"]`, which is captured during OAuth
+  and unique per Salesforce org.
+
+  All public functions accept a `%UserCredential{}` and automatically
+  handle token validation.  Token refresh is not implemented here because
+  Salesforce refresh tokens are long-lived and typically don't expire
+  during a user session; the credential is used as-is.
+
+  ## Contact fields
+
+  The minimal set of fields surfaced in the UI:
+  `FirstName`, `LastName`, `Email`, `Phone`, `Title`,
+  `MailingStreet`, `MailingCity`, `MailingState`, `MailingPostalCode`.
+  """
+
+  @behaviour SocialScribe.SalesforceApiBehaviour
+
+  alias SocialScribe.Accounts.UserCredential
+
+  require Logger
+
+  @api_version "v59.0"
+
+  # Salesforce field names to query and return.
+  @contact_fields ~w(
+    FirstName LastName Email Phone Title
+    MailingStreet MailingCity MailingState MailingPostalCode
+  )
+
+  @doc """
+  Searches Salesforce contacts whose Name contains `query` (case-insensitive).
+  Uses a SOQL query with a LIKE filter; returns up to 10 results.
+
+  ## Return shape
+
+      {:ok, [%{id: "003...", firstname: "Jane", lastname: "Doe", ...}]}
+  """
+  @impl SocialScribe.SalesforceApiBehaviour
+  def search_contacts(%UserCredential{} = credential, query) when is_binary(query) do
+    escaped = String.replace(query, "'", "\\'")
+    fields = Enum.join(@contact_fields, ", ")
+
+    soql =
+      "SELECT Id, #{fields} FROM Contact " <>
+        "WHERE Name LIKE '%#{escaped}%' LIMIT 10"
+
+    url = "/services/data/#{@api_version}/query?q=#{URI.encode(soql)}"
+
+    case Tesla.get(client(credential), url) do
+      {:ok, %Tesla.Env{status: 200, body: %{"records" => records}}} ->
+        {:ok, Enum.map(records, &format_contact/1)}
+
+      {:ok, %Tesla.Env{status: status, body: body}} ->
+        Logger.error("Salesforce search_contacts error #{status}: #{inspect(body)}")
+        {:error, {:api_error, status, body}}
+
+      {:error, reason} ->
+        Logger.error("Salesforce search_contacts HTTP error: #{inspect(reason)}")
+        {:error, {:http_error, reason}}
+    end
+  end
+
+  @doc """
+  Fetches a single Salesforce contact by record ID.
+
+  ## Return shape
+
+      {:ok, %{id: "003...", firstname: "Jane", ...}}
+      {:error, :not_found}
+  """
+  @impl SocialScribe.SalesforceApiBehaviour
+  def get_contact(%UserCredential{} = credential, contact_id) do
+    fields_param = Enum.join(@contact_fields, ",")
+    url = "/services/data/#{@api_version}/sobjects/Contact/#{contact_id}?fields=#{fields_param}"
+
+    case Tesla.get(client(credential), url) do
+      {:ok, %Tesla.Env{status: 200, body: body}} ->
+        {:ok, format_contact(body)}
+
+      {:ok, %Tesla.Env{status: 404}} ->
+        {:error, :not_found}
+
+      {:ok, %Tesla.Env{status: status, body: body}} ->
+        Logger.error("Salesforce get_contact error #{status}: #{inspect(body)}")
+        {:error, {:api_error, status, body}}
+
+      {:error, reason} ->
+        Logger.error("Salesforce get_contact HTTP error: #{inspect(reason)}")
+        {:error, {:http_error, reason}}
+    end
+  end
+
+  @doc """
+  Updates a Salesforce contact record using the PATCH method.
+  `updates` is a map of Salesforce field API names to new string values.
+
+  Salesforce PATCH returns HTTP 204 No Content on success.  This function
+  returns `{:ok, %{id: contact_id}}` in that case.
+
+  ## Examples
+
+      update_contact(credential, "003...", %{"Phone" => "555-0000"})
+  """
+  @impl SocialScribe.SalesforceApiBehaviour
+  def update_contact(%UserCredential{} = credential, contact_id, updates)
+      when is_map(updates) do
+    url = "/services/data/#{@api_version}/sobjects/Contact/#{contact_id}"
+
+    case Tesla.patch(client(credential), url, updates) do
+      {:ok, %Tesla.Env{status: status}} when status in [200, 204] ->
+        {:ok, %{id: contact_id}}
+
+      {:ok, %Tesla.Env{status: 404}} ->
+        {:error, :not_found}
+
+      {:ok, %Tesla.Env{status: status, body: body}} ->
+        Logger.error("Salesforce update_contact error #{status}: #{inspect(body)}")
+        {:error, {:api_error, status, body}}
+
+      {:error, reason} ->
+        Logger.error("Salesforce update_contact HTTP error: #{inspect(reason)}")
+        {:error, {:http_error, reason}}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Private helpers
+  # ---------------------------------------------------------------------------
+
+  # Build a Tesla client that targets the org-specific instance_url.
+  # Every Salesforce org has its own subdomain, stored in credential metadata.
+  defp client(%UserCredential{token: token, metadata: metadata}) do
+    instance_url = (metadata || %{})["instance_url"] || raise_missing_instance_url()
+
+    Tesla.client([
+      {Tesla.Middleware.BaseUrl, instance_url},
+      Tesla.Middleware.JSON,
+      {Tesla.Middleware.Headers,
+       [
+         {"Authorization", "Bearer #{token}"},
+         {"Content-Type", "application/json"}
+       ]}
+    ])
+  end
+
+  defp raise_missing_instance_url do
+    raise ArgumentError,
+          "Salesforce credential is missing instance_url in metadata. " <>
+            "Re-connect the Salesforce account via /auth/salesforce."
+  end
+
+  # Normalise a Salesforce REST API contact record into a flat map with atom
+  # keys that match the field labels used in SalesforceSuggestions.
+  defp format_contact(%{"Id" => id} = record) do
+    %{
+      id: id,
+      firstname: record["FirstName"],
+      lastname: record["LastName"],
+      email: record["Email"],
+      phone: record["Phone"],
+      title: record["Title"],
+      mailing_street: record["MailingStreet"],
+      mailing_city: record["MailingCity"],
+      mailing_state: record["MailingState"],
+      mailing_postal_code: record["MailingPostalCode"],
+      display_name: format_display_name(record)
+    }
+  end
+
+  defp format_contact(_), do: nil
+
+  defp format_display_name(record) do
+    first = record["FirstName"] || ""
+    last = record["LastName"] || ""
+    email = record["Email"] || ""
+    name = String.trim("#{first} #{last}")
+    if name == "", do: email, else: name
+  end
+end
