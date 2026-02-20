@@ -110,7 +110,7 @@ defmodule SocialScribeWeb.MeetingLive.Show do
   def handle_info({:generate_suggestions, contact, meeting, _credential}, socket) do
     case HubspotSuggestions.generate_suggestions_from_meeting(meeting) do
       {:ok, suggestions} ->
-        merged = HubspotSuggestions.merge_with_contact(suggestions, normalize_contact(contact))
+        merged = HubspotSuggestions.merge_with_contact(suggestions, contact)
 
         send_update(SocialScribeWeb.MeetingLive.HubspotModalComponent,
           id: "hubspot-modal",
@@ -226,11 +226,6 @@ defmodule SocialScribeWeb.MeetingLive.Show do
   # ---------------------------------------------------------------------------
   # Private helpers
   # ---------------------------------------------------------------------------
-
-  defp normalize_contact(contact) do
-    # Contact is already formatted with atom keys from HubspotApi.format_contact
-    contact
-  end
 
   defp format_duration(nil), do: "N/A"
 
