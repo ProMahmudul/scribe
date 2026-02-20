@@ -73,7 +73,7 @@ Social Scribe is a powerful Elixir and Phoenix LiveView application designed to 
 * **Backend:** Elixir, Phoenix LiveView
 * **Database:** PostgreSQL
 * **Background Jobs:** Oban
-* **Authentication:** Ueberauth (for Google, LinkedIn, Facebook, HubSpot OAuth)
+* **Authentication:** Ueberauth (for Google, LinkedIn, Facebook, HubSpot, Salesforce OAuth)
 * **Meeting Transcription:** Recall.ai API
 * **AI Content Generation:** Google Gemini API (Flash models)
 * **Frontend:** Tailwind CSS, Heroicons (via `tailwind.config.js`)
@@ -129,6 +129,9 @@ Follow these steps to get SocialScribe running on your local machine.
         * `HUBSPOT_CLIENT_ID`: Your HubSpot App Client ID.
         * `HUBSPOT_CLIENT_SECRET`: Your HubSpot App Client Secret.
         * `HUBSPOT_REDIRECT_URI`: `"http://localhost:4000/auth/hubspot/callback"`
+        * `SALESFORCE_CLIENT_ID`: Your Salesforce Connected App Consumer Key.
+        * `SALESFORCE_CLIENT_SECRET`: Your Salesforce Connected App Consumer Secret.
+        * `SALESFORCE_SITE`: *(optional)* Salesforce login domain, default `https://login.salesforce.com`. Use `https://test.salesforce.com` for sandbox orgs.
 
 4.  **Start the Phoenix Server:**
     ```bash
@@ -184,6 +187,76 @@ Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
 * **Selective Updates:** Checkbox per field allows selective updates; "Update HubSpot" button disabled until at least one field selected
 * **Form Submission:** Batch-updates selected contact properties via `HubspotApi.update_contact`
 * **Click-away Handler:** Closes dropdown without clearing selection
+
+---
+
+## 🔗 Salesforce Integration
+
+### Creating a Salesforce Connected App
+
+1. Log in to your Salesforce org and go to **Setup → App Manager**.
+2. Click **New Connected App**.
+3. Fill in the basic info (name, contact email).
+4. Enable **OAuth Settings**:
+   * **Callback URL:** `http://localhost:4000/auth/salesforce/callback`
+     (use your production domain in production)
+   * **Selected OAuth Scopes:** add `api`, `refresh_token`, `offline_access`
+5. Save. After saving, Salesforce generates a **Consumer Key** (client ID) and
+   **Consumer Secret** — copy both.
+6. Under **OAuth Policies**, set *Permitted Users* to *All users may self-authorize*.
+
+### Required Environment Variables
+
+| Variable | Description |
+|---|---|
+| `SALESFORCE_CLIENT_ID` | Connected App Consumer Key |
+| `SALESFORCE_CLIENT_SECRET` | Connected App Consumer Secret |
+| `SALESFORCE_SITE` | *(optional)* Login domain — `https://login.salesforce.com` (default) or `https://test.salesforce.com` for sandboxes |
+
+### How the Integration Works
+
+* **OAuth flow:** Users click *Connect Salesforce* on the Settings page.
+  The custom Ueberauth strategy redirects to Salesforce, captures the access
+  token **and** the org-specific `instance_url`, then stores both in the
+  `user_credentials` table (`metadata["instance_url"]`).
+* **Meeting modal:** On any processed meeting page an *Update Salesforce*
+  card is shown when a Salesforce account is connected.  Clicking it opens a
+  modal where users can:
+  1. **Search contacts** — live search against the org's Contact records using
+     a SOQL `LIKE` query.
+  2. **AI suggestions** — after selecting a contact, Gemini analyses the
+     meeting transcript and suggests field updates (`Phone`, `Title`,
+     `MailingCity`, etc.).
+  3. **Review & apply** — each suggested field is shown alongside the current
+     Salesforce value.  Users tick the fields they want to update and click
+     *Update Salesforce*.
+
+### Salesforce API Client
+
+* Located at `lib/social_scribe/salesforce_api.ex`
+* Uses the Salesforce **REST API v59.0**
+* Every request uses the Bearer token from the credential and the
+  org-specific base URL from `metadata["instance_url"]`
+* `search_contacts/2` — SOQL `SELECT … FROM Contact WHERE Name LIKE '%…%' LIMIT 10`
+* `get_contact/2` — `GET /sobjects/Contact/{id}?fields=…`
+* `update_contact/3` — `PATCH /sobjects/Contact/{id}` (returns HTTP 204 on success)
+
+### Testability
+
+All Salesforce API calls are behind `SocialScribe.SalesforceApiBehaviour`.
+In tests the implementation is swapped for `SocialScribe.SalesforceApiMock`
+(configured in `test/test_helper.exs` via Mox).  See
+`test/social_scribe_web/live/salesforce_modal_mox_test.exs` for integration
+tests and `test/social_scribe/salesforce_suggestions_test.exs` for unit tests.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `ArgumentError: Salesforce credential is missing instance_url` | Re-connect the Salesforce account; the `instance_url` was not captured correctly during OAuth |
+| 401 Unauthorized on API calls | The access token has expired; re-connect the Salesforce account |
+| No contacts found | Verify the user has `Read` permission on the `Contact` object in the connected org |
+| Sandbox org redirect | Set `SALESFORCE_SITE=https://test.salesforce.com` and update the Connected App callback URL accordingly |
 
 ---
 
