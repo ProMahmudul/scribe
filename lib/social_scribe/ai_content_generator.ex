@@ -9,6 +9,13 @@ defmodule SocialScribe.AIContentGenerator do
   @gemini_model "gemini-2.0-flash-lite"
   @gemini_api_base_url "https://generativelanguage.googleapis.com/v1beta/models"
 
+  # Salesforce field names the AI is allowed to suggest.
+  # Restricting this list prevents hallucinated or unsupported field names.
+  @salesforce_allowed_fields ~w(
+    FirstName LastName Email Phone Title
+    MailingStreet MailingCity MailingState MailingPostalCode
+  )
+
   @impl SocialScribe.AIContentGeneratorApi
   def generate_follow_up_email(meeting) do
     case Meetings.generate_prompt_for_meeting(meeting) do
@@ -101,6 +108,81 @@ defmodule SocialScribe.AIContentGenerator do
     end
   end
 
+  @doc """
+  Generates Salesforce contact update suggestions from a meeting transcript.
+
+  Returns `{:ok, list}` where each entry is a map with keys:
+  `field`, `value`, `context`, `timestamp`.
+
+  The `field` values are Salesforce API field names (e.g. `"Phone"`,
+  `"MailingCity"`). Only fields in the allowed list are returned.
+  """
+  @impl SocialScribe.AIContentGeneratorApi
+  def generate_salesforce_suggestions(meeting) do
+    case Meetings.generate_prompt_for_meeting(meeting) do
+      {:error, reason} ->
+        {:error, reason}
+
+      {:ok, meeting_prompt} ->
+        allowed = Enum.join(@salesforce_allowed_fields, ", ")
+
+        prompt = """
+        You are an AI assistant that extracts contact information updates from meeting transcripts
+        for use in a Salesforce CRM.
+
+        Analyze the following meeting transcript and extract any information that could be used
+        to update a Salesforce Contact record.
+
+        Look for mentions of:
+        - First name (FirstName)
+        - Last name (LastName)
+        - Email address (Email)
+        - Phone number (Phone)
+        - Job title or role (Title)
+        - Mailing street address (MailingStreet)
+        - Mailing city (MailingCity)
+        - Mailing state or province (MailingState)
+        - Mailing postal / ZIP code (MailingPostalCode)
+
+        IMPORTANT: Only extract information that is EXPLICITLY mentioned in the transcript.
+        Do not infer or guess.
+
+        The transcript includes timestamps in [MM:SS] format at the start of each line.
+
+        Return your response as a JSON array of objects. Each object must have:
+        - "field": the Salesforce field API name — use EXACTLY one of: #{allowed}
+        - "value": the extracted value as a string
+        - "context": a brief quote showing where this was mentioned
+        - "timestamp": the timestamp in MM:SS format where this was mentioned
+
+        If no contact information updates are found, return an empty array: []
+
+        Example response format:
+        [
+          {"field": "Phone", "value": "555-123-4567", "context": "you can reach me at 555-123-4567", "timestamp": "01:23"},
+          {"field": "Title", "value": "VP of Engineering", "context": "I'm the VP of Engineering", "timestamp": "04:10"}
+        ]
+
+        ONLY return valid JSON, no other text.
+
+        Meeting transcript:
+        #{meeting_prompt}
+        """
+
+        case call_gemini(prompt) do
+          {:ok, response} ->
+            parse_salesforce_suggestions(response)
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Private helpers
+  # ---------------------------------------------------------------------------
+
   defp parse_hubspot_suggestions(response) do
     # Clean up the response - remove markdown code blocks if present
     cleaned =
@@ -132,6 +214,41 @@ defmodule SocialScribe.AIContentGenerator do
 
       {:error, _} ->
         # If JSON parsing fails, return empty suggestions
+        {:ok, []}
+    end
+  end
+
+  defp parse_salesforce_suggestions(response) do
+    cleaned =
+      response
+      |> String.trim()
+      |> String.replace(~r/^```json\n?/, "")
+      |> String.replace(~r/\n?```$/, "")
+      |> String.trim()
+
+    case Jason.decode(cleaned) do
+      {:ok, suggestions} when is_list(suggestions) ->
+        formatted =
+          suggestions
+          |> Enum.filter(&is_map/1)
+          |> Enum.map(fn s ->
+            %{
+              field: s["field"],
+              value: s["value"],
+              context: s["context"],
+              timestamp: s["timestamp"]
+            }
+          end)
+          |> Enum.filter(fn s ->
+            s.field != nil and s.value != nil and s.field in @salesforce_allowed_fields
+          end)
+
+        {:ok, formatted}
+
+      {:ok, _} ->
+        {:ok, []}
+
+      {:error, _} ->
         {:ok, []}
     end
   end
