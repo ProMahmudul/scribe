@@ -41,6 +41,15 @@ config :ueberauth, Ueberauth.Strategy.Hubspot.OAuth,
   client_id: System.get_env("HUBSPOT_CLIENT_ID"),
   client_secret: System.get_env("HUBSPOT_CLIENT_SECRET")
 
+# Salesforce Connected App credentials.
+# SALESFORCE_SITE controls which login server to use:
+#   - Production: https://login.salesforce.com (default if not set)
+#   - Sandbox:    https://test.salesforce.com
+config :ueberauth, Ueberauth.Strategy.Salesforce.OAuth,
+  client_id: System.get_env("SALESFORCE_CLIENT_ID"),
+  client_secret: System.get_env("SALESFORCE_CLIENT_SECRET"),
+  site: System.get_env("SALESFORCE_SITE", "https://login.salesforce.com")
+
 if System.get_env("PHX_SERVER") do
   config :social_scribe, SocialScribeWeb.Endpoint, server: true
 end
