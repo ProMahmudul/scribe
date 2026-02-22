@@ -4,6 +4,7 @@ defmodule SocialScribeWeb.AuthController do
   alias SocialScribe.FacebookApi
   alias SocialScribe.Accounts
   alias SocialScribeWeb.UserAuth
+  plug SocialScribeWeb.Plugs.GoogleOfflineAccess when action in [:request]
   plug Ueberauth
 
   require Logger
