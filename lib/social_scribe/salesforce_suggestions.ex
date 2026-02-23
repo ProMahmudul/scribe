@@ -37,7 +37,8 @@ defmodule SocialScribe.SalesforceSuggestions do
     "MailingStreet" => "Mailing Street",
     "MailingCity" => "Mailing City",
     "MailingState" => "Mailing State",
-    "MailingPostalCode" => "Mailing Postal Code"
+    "MailingPostalCode" => "Mailing Postal Code",
+    "MailingCountry" => "Mailing Country"
   }
 
   @doc """
@@ -127,5 +128,6 @@ defmodule SocialScribe.SalesforceSuggestions do
   defp salesforce_field_to_atom("MailingCity"), do: :mailing_city
   defp salesforce_field_to_atom("MailingState"), do: :mailing_state
   defp salesforce_field_to_atom("MailingPostalCode"), do: :mailing_postal_code
+  defp salesforce_field_to_atom("MailingCountry"), do: :mailing_country
   defp salesforce_field_to_atom(_), do: nil
 end

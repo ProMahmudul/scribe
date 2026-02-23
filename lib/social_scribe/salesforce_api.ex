@@ -29,7 +29,7 @@ defmodule SocialScribe.SalesforceApi do
   # Salesforce field names to query and return.
   @contact_fields ~w(
     FirstName LastName Email Phone Title
-    MailingStreet MailingCity MailingState MailingPostalCode
+    MailingStreet MailingCity MailingState MailingPostalCode MailingCountry
   )
 
   @doc """
@@ -168,6 +168,7 @@ defmodule SocialScribe.SalesforceApi do
       mailing_city: record["MailingCity"],
       mailing_state: record["MailingState"],
       mailing_postal_code: record["MailingPostalCode"],
+      mailing_country: record["MailingCountry"],
       display_name: format_display_name(record)
     }
   end

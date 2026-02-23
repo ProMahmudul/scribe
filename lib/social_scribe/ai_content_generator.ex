@@ -6,14 +6,14 @@ defmodule SocialScribe.AIContentGenerator do
   alias SocialScribe.Meetings
   alias SocialScribe.Automations
 
-  @gemini_model "gemini-2.0-flash-lite"
+  @gemini_model "gemini-2.5-flash-lite"
   @gemini_api_base_url "https://generativelanguage.googleapis.com/v1beta/models"
 
   # Salesforce field names the AI is allowed to suggest.
   # Restricting this list prevents hallucinated or unsupported field names.
   @salesforce_allowed_fields ~w(
     FirstName LastName Email Phone Title
-    MailingStreet MailingCity MailingState MailingPostalCode
+    MailingStreet MailingCity MailingState MailingPostalCode MailingCountry
   )
 
   @impl SocialScribe.AIContentGeneratorApi
@@ -143,6 +143,7 @@ defmodule SocialScribe.AIContentGenerator do
         - Mailing city (MailingCity)
         - Mailing state or province (MailingState)
         - Mailing postal / ZIP code (MailingPostalCode)
+        - Mailing country (MailingCountry)
 
         IMPORTANT: Only extract information that is EXPLICITLY mentioned in the transcript.
         Do not infer or guess.
