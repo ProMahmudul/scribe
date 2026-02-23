@@ -59,6 +59,7 @@ defmodule SocialScribeWeb.MeetingLive.SalesforceModalComponent do
           loading={@loading}
           myself={@myself}
           patch={@patch}
+          default_country={@default_country}
         />
       <% end %>
     </div>
@@ -69,9 +70,21 @@ defmodule SocialScribeWeb.MeetingLive.SalesforceModalComponent do
   attr :loading, :boolean, required: true
   attr :myself, :any, required: true
   attr :patch, :string, required: true
+  attr :default_country, :string, default: nil
 
   defp suggestions_section(assigns) do
     assigns = assign(assigns, :selected_count, Enum.count(assigns.suggestions, & &1.apply))
+
+    state_applied? =
+      Enum.any?(assigns.suggestions, &(&1.field == "MailingState" and &1.apply))
+
+    country_in_suggestions? =
+      Enum.any?(assigns.suggestions, &(&1.field == "MailingCountry"))
+
+    show_state_warning? =
+      state_applied? and not country_in_suggestions? and is_nil(assigns.default_country)
+
+    assigns = assign(assigns, :show_state_warning, show_state_warning?)
 
     ~H"""
     <div class="space-y-4">
@@ -87,6 +100,18 @@ defmodule SocialScribeWeb.MeetingLive.SalesforceModalComponent do
             submessage="The AI didn't detect any new contact information in the transcript."
           />
         <% else %>
+          <div
+            :if={@show_state_warning}
+            class="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          >
+            <.icon name="hero-exclamation-triangle" class="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <span>
+              Salesforce requires a country before setting state. The Mailing State value will be skipped unless you also select a Mailing Country or set the
+              <code>SALESFORCE_DEFAULT_COUNTRY</code>
+              environment variable.
+            </span>
+          </div>
+
           <form phx-submit="apply_updates" phx-change="toggle_suggestion" phx-target={@myself}>
             <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
               <.suggestion_card :for={suggestion <- @suggestions} suggestion={suggestion} />
@@ -123,6 +148,7 @@ defmodule SocialScribeWeb.MeetingLive.SalesforceModalComponent do
       |> assign_new(:searching, fn -> false end)
       |> assign_new(:dropdown_open, fn -> false end)
       |> assign_new(:error, fn -> nil end)
+      |> assign_new(:default_country, fn -> nil end)
 
     {:ok, socket}
   end

@@ -37,6 +37,11 @@ defmodule SocialScribeWeb.MeetingLive.Show do
       salesforce_credential =
         Accounts.get_user_salesforce_credential(socket.assigns.current_user.id)
 
+      salesforce_default_country =
+        :social_scribe
+        |> Application.get_env(:salesforce, [])
+        |> Keyword.get(:default_country)
+
       socket =
         socket
         |> assign(:page_title, "Meeting Details: #{meeting.title}")
@@ -45,6 +50,7 @@ defmodule SocialScribeWeb.MeetingLive.Show do
         |> assign(:user_has_automations, user_has_automations)
         |> assign(:hubspot_credential, hubspot_credential)
         |> assign(:salesforce_credential, salesforce_credential)
+        |> assign(:salesforce_default_country, salesforce_default_country)
         |> assign(
           :follow_up_email_form,
           to_form(%{
