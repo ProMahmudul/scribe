@@ -18,6 +18,12 @@ defmodule SocialScribeWeb.SalesforceModalMoxTest do
 
   describe "Salesforce Modal with mocked API" do
     setup %{conn: conn} do
+      # Stub uses_address_code_fields? so all tests that go through the
+      # apply_salesforce_updates handler work without picklist-detection HTTP calls.
+      Mox.stub(SocialScribe.SalesforceApiMock, :uses_address_code_fields?, fn _credential ->
+        false
+      end)
+
       user = user_fixture()
       salesforce_credential = salesforce_credential_fixture(%{user_id: user.id})
       meeting = meeting_fixture_with_transcript(user)
@@ -329,6 +335,13 @@ defmodule SocialScribeWeb.SalesforceModalMoxTest do
 
       assert {:ok, _} =
                SocialScribe.SalesforceApiBehaviour.update_contact(credential, "003abc", updates)
+    end
+
+    test "uses_address_code_fields? delegates to implementation", %{credential: credential} do
+      SocialScribe.SalesforceApiMock
+      |> expect(:uses_address_code_fields?, fn _cred -> true end)
+
+      assert SocialScribe.SalesforceApiBehaviour.uses_address_code_fields?(credential) == true
     end
   end
 
