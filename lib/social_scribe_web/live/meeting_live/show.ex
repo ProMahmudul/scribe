@@ -289,6 +289,17 @@ defmodule SocialScribeWeb.MeetingLive.Show do
           {:noreply, socket}
         end
 
+      {:error, :session_expired} ->
+        send_update(SocialScribeWeb.MeetingLive.SalesforceModalComponent,
+          id: "salesforce-modal",
+          error:
+            "Salesforce session expired. Please reconnect your Salesforce account " <>
+              "on the Settings page and try again.",
+          loading: false
+        )
+
+        {:noreply, socket}
+
       {:error, reason} ->
         send_update(SocialScribeWeb.MeetingLive.SalesforceModalComponent,
           id: "salesforce-modal",

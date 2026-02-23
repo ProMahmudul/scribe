@@ -290,6 +290,73 @@ defmodule SocialScribeWeb.SalesforceModalMoxTest do
     end
   end
 
+  describe "session expiry handling" do
+    setup %{conn: conn} do
+      Mox.stub(SocialScribe.SalesforceApiMock, :uses_address_code_fields?, fn _ -> false end)
+
+      user = user_fixture()
+      _salesforce_credential = salesforce_credential_fixture(%{user_id: user.id})
+      meeting = meeting_fixture_with_transcript(user)
+
+      %{conn: log_in_user(conn, user), meeting: meeting}
+    end
+
+    test "shows reconnect message when update_contact returns :session_expired",
+         %{conn: conn, meeting: meeting} do
+      mock_contact = %{
+        id: "003exp",
+        firstname: "Expired",
+        lastname: "Token",
+        email: "expired@example.com",
+        phone: nil,
+        title: nil,
+        display_name: "Expired Token"
+      }
+
+      mock_suggestions = [
+        %{field: "Phone", value: "555-0001", context: "mentioned number", timestamp: "01:00"}
+      ]
+
+      SocialScribe.SalesforceApiMock
+      |> expect(:search_contacts, fn _credential, _query -> {:ok, [mock_contact]} end)
+
+      SocialScribe.SalesforceApiMock
+      |> expect(:update_contact, fn _credential, _contact_id, _updates ->
+        {:error, :session_expired}
+      end)
+
+      SocialScribe.AIContentGeneratorMock
+      |> expect(:generate_salesforce_suggestions, fn _meeting -> {:ok, mock_suggestions} end)
+
+      {:ok, view, _html} = live(conn, ~p"/dashboard/meetings/#{meeting.id}/salesforce")
+
+      view
+      |> element("input[phx-keyup='contact_search']")
+      |> render_keyup(%{"value" => "Expired"})
+
+      :timer.sleep(200)
+
+      view
+      |> element("button[phx-click='select_contact'][phx-value-id='003exp']")
+      |> render_click()
+
+      :timer.sleep(500)
+
+      view
+      |> element("form[phx-submit='apply_updates']")
+      |> render_submit(%{
+        "apply" => %{"Phone" => "1"},
+        "values" => %{"Phone" => "555-0001"}
+      })
+
+      :timer.sleep(200)
+
+      html = render(view)
+
+      assert html =~ "session expired" or html =~ "reconnect"
+    end
+  end
+
   describe "Salesforce API behaviour delegation" do
     setup do
       user = user_fixture()

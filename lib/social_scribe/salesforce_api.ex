@@ -21,6 +21,7 @@ defmodule SocialScribe.SalesforceApi do
   @behaviour SocialScribe.SalesforceApiBehaviour
 
   alias SocialScribe.Accounts.UserCredential
+  alias SocialScribe.Salesforce.TokenRefresher
 
   require Logger
 
@@ -45,27 +46,29 @@ defmodule SocialScribe.SalesforceApi do
   """
   @impl SocialScribe.SalesforceApiBehaviour
   def search_contacts(%UserCredential{} = credential, query) when is_binary(query) do
-    escaped = String.replace(query, "'", "\\'")
-    fields = Enum.join(@contact_fields, ", ")
+    with_sf_token_refresh(credential, fn cred ->
+      escaped = String.replace(query, "'", "\\'")
+      fields = Enum.join(@contact_fields, ", ")
 
-    soql =
-      "SELECT Id, #{fields} FROM Contact " <>
-        "WHERE Name LIKE '%#{escaped}%' LIMIT 10"
+      soql =
+        "SELECT Id, #{fields} FROM Contact " <>
+          "WHERE Name LIKE '%#{escaped}%' LIMIT 10"
 
-    url = "/services/data/#{@api_version}/query?q=#{URI.encode(soql)}"
+      url = "/services/data/#{@api_version}/query?q=#{URI.encode(soql)}"
 
-    case Tesla.get(client(credential), url) do
-      {:ok, %Tesla.Env{status: 200, body: %{"records" => records}}} ->
-        {:ok, Enum.map(records, &format_contact/1)}
+      case Tesla.get(client(cred), url) do
+        {:ok, %Tesla.Env{status: 200, body: %{"records" => records}}} ->
+          {:ok, Enum.map(records, &format_contact/1)}
 
-      {:ok, %Tesla.Env{status: status, body: body}} ->
-        Logger.error("Salesforce search_contacts error #{status}: #{inspect(body)}")
-        {:error, {:api_error, status, body}}
+        {:ok, %Tesla.Env{status: status, body: body}} ->
+          Logger.error("Salesforce search_contacts error #{status}: #{inspect(body)}")
+          {:error, {:api_error, status, body}}
 
-      {:error, reason} ->
-        Logger.error("Salesforce search_contacts HTTP error: #{inspect(reason)}")
-        {:error, {:http_error, reason}}
-    end
+        {:error, reason} ->
+          Logger.error("Salesforce search_contacts HTTP error: #{inspect(reason)}")
+          {:error, {:http_error, reason}}
+      end
+    end)
   end
 
   @doc """
@@ -78,24 +81,26 @@ defmodule SocialScribe.SalesforceApi do
   """
   @impl SocialScribe.SalesforceApiBehaviour
   def get_contact(%UserCredential{} = credential, contact_id) do
-    fields_param = Enum.join(@contact_fields, ",")
-    url = "/services/data/#{@api_version}/sobjects/Contact/#{contact_id}?fields=#{fields_param}"
+    with_sf_token_refresh(credential, fn cred ->
+      fields_param = Enum.join(@contact_fields, ",")
+      url = "/services/data/#{@api_version}/sobjects/Contact/#{contact_id}?fields=#{fields_param}"
 
-    case Tesla.get(client(credential), url) do
-      {:ok, %Tesla.Env{status: 200, body: body}} ->
-        {:ok, format_contact(body)}
+      case Tesla.get(client(cred), url) do
+        {:ok, %Tesla.Env{status: 200, body: body}} ->
+          {:ok, format_contact(body)}
 
-      {:ok, %Tesla.Env{status: 404}} ->
-        {:error, :not_found}
+        {:ok, %Tesla.Env{status: 404}} ->
+          {:error, :not_found}
 
-      {:ok, %Tesla.Env{status: status, body: body}} ->
-        Logger.error("Salesforce get_contact error #{status}: #{inspect(body)}")
-        {:error, {:api_error, status, body}}
+        {:ok, %Tesla.Env{status: status, body: body}} ->
+          Logger.error("Salesforce get_contact error #{status}: #{inspect(body)}")
+          {:error, {:api_error, status, body}}
 
-      {:error, reason} ->
-        Logger.error("Salesforce get_contact HTTP error: #{inspect(reason)}")
-        {:error, {:http_error, reason}}
-    end
+        {:error, reason} ->
+          Logger.error("Salesforce get_contact HTTP error: #{inspect(reason)}")
+          {:error, {:http_error, reason}}
+      end
+    end)
   end
 
   @doc """
@@ -112,23 +117,25 @@ defmodule SocialScribe.SalesforceApi do
   @impl SocialScribe.SalesforceApiBehaviour
   def update_contact(%UserCredential{} = credential, contact_id, updates)
       when is_map(updates) do
-    url = "/services/data/#{@api_version}/sobjects/Contact/#{contact_id}"
+    with_sf_token_refresh(credential, fn cred ->
+      url = "/services/data/#{@api_version}/sobjects/Contact/#{contact_id}"
 
-    case Tesla.patch(client(credential), url, updates) do
-      {:ok, %Tesla.Env{status: status}} when status in [200, 204] ->
-        {:ok, %{id: contact_id}}
+      case Tesla.patch(client(cred), url, updates) do
+        {:ok, %Tesla.Env{status: status}} when status in [200, 204] ->
+          {:ok, %{id: contact_id}}
 
-      {:ok, %Tesla.Env{status: 404}} ->
-        {:error, :not_found}
+        {:ok, %Tesla.Env{status: 404}} ->
+          {:error, :not_found}
 
-      {:ok, %Tesla.Env{status: status, body: body}} ->
-        Logger.error("Salesforce update_contact error #{status}: #{inspect(body)}")
-        {:error, {:api_error, status, body}}
+        {:ok, %Tesla.Env{status: status, body: body}} ->
+          Logger.error("Salesforce update_contact error #{status}: #{inspect(body)}")
+          {:error, {:api_error, status, body}}
 
-      {:error, reason} ->
-        Logger.error("Salesforce update_contact HTTP error: #{inspect(reason)}")
-        {:error, {:http_error, reason}}
-    end
+        {:error, reason} ->
+          Logger.error("Salesforce update_contact HTTP error: #{inspect(reason)}")
+          {:error, {:http_error, reason}}
+      end
+    end)
   end
 
   @doc """
@@ -248,5 +255,51 @@ defmodule SocialScribe.SalesforceApi do
     email = record["Email"] || ""
     name = String.trim("#{first} #{last}")
     if name == "", do: email, else: name
+  end
+
+  # ---------------------------------------------------------------------------
+  # Token-refresh wrapper
+  # ---------------------------------------------------------------------------
+
+  # Executes `api_call.(credential)`.  If the result is a 401
+  # INVALID_SESSION_ID, attempts to refresh the Salesforce access token and
+  # retries the call once.  On persistent session failure (or if there is no
+  # refresh_token), returns `{:error, :session_expired}` so callers can
+  # surface a user-friendly reconnect prompt.
+  defp with_sf_token_refresh(%UserCredential{} = credential, api_call) do
+    case api_call.(credential) do
+      {:error, {:api_error, 401, body}} when is_list(body) ->
+        if invalid_session?(body) do
+          Logger.info("Salesforce session invalid — attempting token refresh...")
+          retry_after_refresh(credential, api_call)
+        else
+          {:error, {:api_error, 401, body}}
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp retry_after_refresh(credential, api_call) do
+    case TokenRefresher.refresh_credential(credential) do
+      {:ok, refreshed} ->
+        case api_call.(refreshed) do
+          {:error, {:api_error, 401, _}} ->
+            Logger.warning("Salesforce session still invalid after token refresh")
+            {:error, :session_expired}
+
+          result ->
+            result
+        end
+
+      {:error, reason} ->
+        Logger.warning("Salesforce token refresh failed: #{inspect(reason)}")
+        {:error, :session_expired}
+    end
+  end
+
+  defp invalid_session?(errors) when is_list(errors) do
+    Enum.any?(errors, &match?(%{"errorCode" => "INVALID_SESSION_ID"}, &1))
   end
 end
