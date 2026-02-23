@@ -205,11 +205,16 @@ defmodule SocialScribeWeb.MeetingLive.Show do
 
   @impl true
   def handle_info({:apply_salesforce_updates, updates, contact, credential}, socket) do
-    case SalesforceApi.update_contact(credential, contact.id, updates) do
+    sanitized = SalesforceSuggestions.build_update_payload(updates)
+
+    case SalesforceApi.update_contact(credential, contact.id, sanitized) do
       {:ok, _result} ->
         socket =
           socket
-          |> put_flash(:info, "Successfully updated #{map_size(updates)} field(s) in Salesforce")
+          |> put_flash(
+            :info,
+            "Successfully updated #{map_size(sanitized)} field(s) in Salesforce"
+          )
           |> push_patch(to: ~p"/dashboard/meetings/#{socket.assigns.meeting}")
 
         {:noreply, socket}

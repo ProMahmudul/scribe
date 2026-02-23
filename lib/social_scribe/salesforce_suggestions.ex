@@ -27,6 +27,8 @@ defmodule SocialScribe.SalesforceSuggestions do
 
   alias SocialScribe.AIContentGeneratorApi
 
+  require Logger
+
   # Maps Salesforce API field names to human-readable labels for the UI.
   @field_labels %{
     "FirstName" => "First Name",
@@ -96,6 +98,42 @@ defmodule SocialScribe.SalesforceSuggestions do
       }
     end)
     |> Enum.filter(fn s -> s.has_change end)
+  end
+
+  @doc """
+  Sanitizes an update payload map before it is sent to the Salesforce API.
+
+  Enforces the Salesforce org requirement that `MailingCountry` must be
+  present whenever `MailingState` is set (applies when the org has
+  "State and Country Picklists" enabled).
+
+  Rules applied, in order:
+
+  1. If `MailingState` is absent — payload is returned unchanged.
+  2. If `MailingCountry` is already present — payload is returned unchanged.
+  3. If `default_country` is configured under `:social_scribe → :salesforce` —
+     `MailingCountry` is injected with that value.
+  4. Otherwise — `MailingState` is removed and a warning is logged.
+  """
+  def build_update_payload(updates) when is_map(updates) do
+    if Map.has_key?(updates, "MailingState") and not Map.has_key?(updates, "MailingCountry") do
+      default_country =
+        :social_scribe
+        |> Application.get_env(:salesforce, [])
+        |> Keyword.get(:default_country)
+
+      if default_country do
+        Map.put(updates, "MailingCountry", default_country)
+      else
+        Logger.warning(
+          "Skipping MailingState update because Salesforce requires MailingCountry"
+        )
+
+        Map.delete(updates, "MailingState")
+      end
+    else
+      updates
+    end
   end
 
   @doc """
