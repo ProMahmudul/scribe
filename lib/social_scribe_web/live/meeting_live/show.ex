@@ -367,7 +367,7 @@ defmodule SocialScribeWeb.MeetingLive.Show do
           <div :for={segment <- @meeting_transcript.content["data"]} class="mb-3">
             <p>
               <span class="font-semibold text-indigo-600">
-                {segment["speaker"] || "Unknown Speaker"}:
+                {segment_speaker_label(segment)}:
               </span>
               {Enum.map_join(segment["words"] || [], " ", & &1["text"])}
             </p>
@@ -380,5 +380,21 @@ defmodule SocialScribeWeb.MeetingLive.Show do
       </div>
     </div>
     """
+  end
+
+  # Extracts a display name for a transcript segment speaker.
+  # Prefers participant["name"], then participant["email"], then legacy
+  # segment["speaker"], falling back to "Unknown Speaker".
+  defp segment_speaker_label(segment) do
+    participant = segment["participant"] || %{}
+    name = participant["name"]
+    email = participant["email"]
+
+    cond do
+      is_binary(name) and name != "" -> name
+      is_binary(email) and email != "" -> email
+      is_binary(segment["speaker"]) and segment["speaker"] != "" -> segment["speaker"]
+      true -> "Unknown Speaker"
+    end
   end
 end

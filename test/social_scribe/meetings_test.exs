@@ -346,4 +346,68 @@ defmodule SocialScribe.MeetingsTest do
              """
     end
   end
+
+  describe "transcript speaker label extraction" do
+    # Helper that builds a transcript fixture and returns the generated prompt.
+    defp prompt_for_segments(meeting, segments) do
+      content = %{"data" => segments}
+      meeting_transcript_fixture(%{meeting_id: meeting.id, content: content})
+      meeting_participant_fixture(%{meeting_id: meeting.id, is_host: true})
+      full = Meetings.get_meeting_with_details(meeting.id)
+      {:ok, prompt} = Meetings.generate_prompt_for_meeting(full)
+      prompt
+    end
+
+    test "uses participant name when present" do
+      meeting = meeting_fixture()
+
+      segment = %{
+        "participant" => %{"name" => "Alice Smith", "email" => "alice@example.com"},
+        "words" => [%{"text" => "Hello", "start_timestamp" => 0.0}],
+        "language" => "en-us"
+      }
+
+      prompt = prompt_for_segments(meeting, [segment])
+      assert prompt =~ "Alice Smith: Hello"
+    end
+
+    test "falls back to participant email when name is absent" do
+      meeting = meeting_fixture()
+
+      segment = %{
+        "participant" => %{"name" => nil, "email" => "bob@example.com"},
+        "words" => [%{"text" => "Hi", "start_timestamp" => 1.0}],
+        "language" => "en-us"
+      }
+
+      prompt = prompt_for_segments(meeting, [segment])
+      assert prompt =~ "bob@example.com: Hi"
+    end
+
+    test "falls back to legacy speaker field when participant is absent" do
+      meeting = meeting_fixture()
+
+      segment = %{
+        "speaker" => "Carol Jones",
+        "words" => [%{"text" => "Hey", "start_timestamp" => 2.0}],
+        "language" => "en-us"
+      }
+
+      prompt = prompt_for_segments(meeting, [segment])
+      assert prompt =~ "Carol Jones: Hey"
+    end
+
+    test "falls back to Unknown Speaker when no name, email, or speaker" do
+      meeting = meeting_fixture()
+
+      segment = %{
+        "participant" => %{},
+        "words" => [%{"text" => "Hmm", "start_timestamp" => 3.0}],
+        "language" => "en-us"
+      }
+
+      prompt = prompt_for_segments(meeting, [segment])
+      assert prompt =~ "Unknown Speaker: Hmm"
+    end
+  end
 end

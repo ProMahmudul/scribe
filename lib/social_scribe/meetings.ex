@@ -511,7 +511,7 @@ defmodule SocialScribe.Meetings do
 
   defp format_transcript_for_prompt(transcript_segments) when is_list(transcript_segments) do
     Enum.map_join(transcript_segments, "\n", fn segment ->
-      speaker = Map.get(segment, "speaker", "Unknown Speaker")
+      speaker = speaker_label(segment)
       words = Map.get(segment, "words", [])
       text = Enum.map_join(words, " ", &Map.get(&1, "text", ""))
       timestamp = format_timestamp(List.first(words))
@@ -520,6 +520,22 @@ defmodule SocialScribe.Meetings do
   end
 
   defp format_transcript_for_prompt(_), do: ""
+
+  defp speaker_label(segment) do
+    participant = Map.get(segment, "participant", %{})
+    name = Map.get(participant, "name")
+    email = Map.get(participant, "email")
+
+    cond do
+      is_binary(name) and name != "" -> name
+      is_binary(email) and email != "" -> email
+      is_binary(Map.get(segment, "speaker")) and Map.get(segment, "speaker") != "" ->
+        Map.get(segment, "speaker")
+
+      true ->
+        "Unknown Speaker"
+    end
+  end
 
   defp format_timestamp(nil), do: "00:00"
 
