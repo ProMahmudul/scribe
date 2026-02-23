@@ -179,6 +179,77 @@ defmodule SocialScribe.SalesforceSuggestionsTest do
       assert labels["MailingCity"] == "Mailing City"
       assert labels["MailingState"] == "Mailing State"
       assert labels["MailingPostalCode"] == "Mailing Postal Code"
+      assert labels["MailingCountry"] == "Mailing Country"
+    end
+  end
+
+  describe "build_update_payload/1" do
+    # Restore whatever salesforce config was present before each test.
+    setup do
+      original = Application.get_env(:social_scribe, :salesforce)
+
+      on_exit(fn ->
+        if original do
+          Application.put_env(:social_scribe, :salesforce, original)
+        else
+          Application.delete_env(:social_scribe, :salesforce)
+        end
+      end)
+
+      :ok
+    end
+
+    test "injects MailingCountry from config when MailingState is present but MailingCountry is not" do
+      Application.put_env(:social_scribe, :salesforce, default_country: "United States")
+
+      payload = %{"MailingState" => "CA", "Phone" => "555-0001"}
+      result = SalesforceSuggestions.build_update_payload(payload)
+
+      assert result["MailingCountry"] == "United States"
+      assert result["MailingState"] == "CA"
+      assert result["Phone"] == "555-0001"
+    end
+
+    test "drops MailingState and logs a warning when no default_country is configured" do
+      Application.put_env(:social_scribe, :salesforce, default_country: nil)
+
+      payload = %{"MailingState" => "TX", "Phone" => "555-0002"}
+
+      import ExUnit.CaptureLog
+
+      log =
+        capture_log(fn ->
+          result = SalesforceSuggestions.build_update_payload(payload)
+
+          refute Map.has_key?(result, "MailingState")
+          assert result["Phone"] == "555-0002"
+        end)
+
+      assert log =~ "Skipping MailingState update"
+    end
+
+    test "returns payload unchanged when MailingCountry is already present" do
+      Application.put_env(:social_scribe, :salesforce, default_country: "United States")
+
+      payload = %{"MailingState" => "NY", "MailingCountry" => "Canada"}
+      result = SalesforceSuggestions.build_update_payload(payload)
+
+      assert result == payload
+    end
+
+    test "returns payload unchanged when MailingState is absent" do
+      Application.put_env(:social_scribe, :salesforce, default_country: "United States")
+
+      payload = %{"Phone" => "555-0003", "Email" => "a@example.com"}
+      result = SalesforceSuggestions.build_update_payload(payload)
+
+      assert result == payload
+    end
+
+    test "returns empty map unchanged" do
+      result = SalesforceSuggestions.build_update_payload(%{})
+
+      assert result == %{}
     end
   end
 end
