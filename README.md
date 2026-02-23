@@ -81,68 +81,149 @@ Social Scribe is a powerful Elixir and Phoenix LiveView application designed to 
 
 ---
 
-## 🚀 Getting Started
-
-Follow these steps to get SocialScribe running on your local machine.
+## 🚀 Local Setup
 
 ### Prerequisites
 
-* Elixir
-* Erlang/OTP 
-* PostgreSQL
-* Node.js (for Tailwind CSS asset compilation)
+| Tool | Minimum version |
+|------|----------------|
+| Elixir | 1.15+ |
+| Erlang/OTP | 26+ |
+| PostgreSQL | 14+ |
+| Node.js | 18+ (for Tailwind/esbuild asset compilation) |
 
-### Setup Instructions
+### Step-by-step
 
-1.  **Clone the Repository:**
-    ```bash
-    git clone https://github.com/fparadas/social_scribe.git 
-    cd social_scribe
-    ```
+```bash
+# 1. Clone the repository
+git clone https://github.com/fparadas/social_scribe.git
+cd social_scribe
 
-2.  **Install Dependencies & Setup Database:**
-    The `mix setup` command bundles common setup tasks.
-    ```bash
-    mix setup
-    ```
-    This will typically:
-    * Install Elixir dependencies (`mix deps.get`)
-    * Create your database if it doesn't exist (`mix ecto.create`)
-    * Run database migrations (`mix ecto.migrate`)
-    * Install Node.js dependencies for assets (`cd assets && npm install && cd ..`)
+# 2. Copy the example env file and fill in your credentials
+cp .env.example .env
+# Edit .env — see "Required environment variables" below
 
-3.  **Configure Environment Variables:**
-    You'll need to set up several API keys and OAuth credentials.
-    * Copy the example environment file (if one is provided, e.g., `.env.example`) to `.env`.
-    * Edit the `.env` file (or set environment variables directly) with your actual credentials:
-        * `GOOGLE_CLIENT_ID`: Your Google OAuth Client ID.
-        * `GOOGLE_CLIENT_SECRET`: Your Google OAuth Client Secret.
-        * `GOOGLE_REDIRECT_URI`: `"http://localhost:4000/auth/google/callback"`
-        * `RECALL_API_KEY`: Your Recall.ai API Key (as provided for the challenge).
-        * `GEMINI_API_KEY`: Your Google Gemini API Key.
-        * `LINKEDIN_CLIENT_ID`: Your LinkedIn App Client ID.
-        * `LINKEDIN_CLIENT_SECRET`: Your LinkedIn App Client Secret.
-        * `LINKEDIN_REDIRECT_URI`: `"http://localhost:4000/auth/linkedin/callback"`
-        * `FACEBOOK_APP_ID`: Your Facebook App ID.
-        * `FACEBOOK_APP_SECRET`: Your Facebook App Secret.
-        * `FACEBOOK_REDIRECT_URI`: `"http://localhost:4000/auth/facebook/callback"`
-        * `HUBSPOT_CLIENT_ID`: Your HubSpot App Client ID.
-        * `HUBSPOT_CLIENT_SECRET`: Your HubSpot App Client Secret.
-        * `HUBSPOT_REDIRECT_URI`: `"http://localhost:4000/auth/hubspot/callback"`
-        * `SALESFORCE_CLIENT_ID`: Your Salesforce Connected App Consumer Key.
-        * `SALESFORCE_CLIENT_SECRET`: Your Salesforce Connected App Consumer Secret.
-        * `SALESFORCE_SITE`: *(optional)* Salesforce login domain, default `https://login.salesforce.com`. Use `https://test.salesforce.com` for sandbox orgs.
+# 3. Install Elixir dependencies
+mix deps.get
 
-4.  **Start the Phoenix Server:**
-    ```bash
-    mix phx.server
-    ```
-    Or, to run inside IEx (Interactive Elixir):
-    ```bash
-    iex -S mix phx.server
-    ```
+# 4. Create the database and run all migrations
+mix ecto.create && mix ecto.migrate
 
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
+# 5. Install JavaScript/CSS build tools (first run only)
+mix assets.setup
+
+# 6. Source your env file, then start the server
+source .env && mix phx.server
+```
+
+Visit [http://localhost:4000](http://localhost:4000).
+
+> **Tip:** Use `iex -S mix phx.server` instead if you want an interactive shell.
+
+---
+
+### Required environment variables
+
+All variables are documented in [`.env.example`](.env.example).
+The table below lists the **mandatory** ones — the server will start without
+the optional ones, but those features will be disabled.
+
+| Variable | Required for |
+|---|---|
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | Google login + Calendar sync |
+| `RECALL_API_KEY` / `RECALL_REGION` | AI meeting bots |
+| `GEMINI_API_KEY` | AI email/post drafts |
+| `LINKEDIN_CLIENT_ID` / `LINKEDIN_CLIENT_SECRET` / `LINKEDIN_REDIRECT_URI` | LinkedIn posting |
+| `FACEBOOK_CLIENT_ID` / `FACEBOOK_CLIENT_SECRET` / `FACEBOOK_REDIRECT_URI` | Facebook posting |
+| `HUBSPOT_CLIENT_ID` / `HUBSPOT_CLIENT_SECRET` | HubSpot contact sync |
+| `SALESFORCE_CLIENT_ID` / `SALESFORCE_CLIENT_SECRET` | Salesforce contact sync |
+
+---
+
+### Verifying background jobs (Oban)
+
+After starting the server you can confirm Oban is running:
+
+```elixir
+# In: iex -S mix phx.server
+iex> Process.whereis(Oban)        # should return a PID, not nil
+iex> Oban.check_queue(:polling)   # %{limit: 5, paused: false, ...}
+iex> Oban.check_queue(:default)   # %{limit: 10, paused: false, ...}
+```
+
+Configured queues:
+
+| Queue | Concurrency | Workers |
+|---|---|---|
+| `default` | 10 | General-purpose jobs |
+| `ai_content` | 10 | `AIContentGenerationWorker` |
+| `polling` | 5 | `BotStatusPoller` (every 2 min), `HubspotTokenRefresher` (every 5 min) |
+
+---
+
+## 🛠 Troubleshooting
+
+### Google OAuth — missing `refresh_token`
+
+**Symptom:** Calendar sync works once, but breaks after the session expires.
+
+**Cause:** Google only issues a `refresh_token` on the first authorization or
+when `prompt=consent` is forced.  The app sets `access_type=offline` and
+`prompt=consent select_account` automatically, but a previously stored
+credential may be missing the token.
+
+**Fix:** Disconnect the Google account on the Settings page, then reconnect to
+force a new consent screen and a fresh `refresh_token`.
+
+---
+
+### Google Calendar API — no events visible
+
+**Symptom:** Dashboard shows no calendar events after connecting Google.
+
+**Checklist:**
+1. Ensure the Google Cloud project has the **Google Calendar API** enabled.
+2. Verify the OAuth consent screen includes the `https://www.googleapis.com/auth/calendar.readonly` scope.
+3. Reconnect the Google account so the updated scope is consented to.
+
+---
+
+### Recall.ai bot — bot never joins the meeting
+
+**Symptom:** You toggled "Record Meeting?" but no bot appears in the call.
+
+**Checklist:**
+1. Verify `RECALL_API_KEY` and `RECALL_REGION` are set correctly.
+2. Confirm the calendar event has a detectable meeting link (Zoom or Google Meet) in the `location` or `description` field.
+3. Run `Oban.check_queue(:polling)` in `iex` — the `BotStatusPoller` cron runs every 2 minutes.
+4. Check the server log for errors from `BotStatusPoller` or `RecallApi`.
+
+---
+
+### Salesforce — 401 / session expired
+
+**Symptom:** Salesforce contact search or update returns 401 Unauthorized.
+
+**Fix:** Disconnect and reconnect the Salesforce account on the Settings page.
+Access tokens expire based on the Connected App's token policy (default 2 hours).
+
+**Prevention:** Set *Token Timeout Policy* to "No expiration" in the Connected
+App's OAuth Policies in Salesforce Setup.
+
+---
+
+### Salesforce — `FIELD_INTEGRITY_EXCEPTION` on address update
+
+**Symptom:** Updating `MailingState` / `MailingCountry` raises
+`FIELD_INTEGRITY_EXCEPTION`.
+
+**Cause:** The org has **State and Country/Territory Picklists** enabled.
+The API requires `MailingStateCode` / `MailingCountryCode` (ISO codes) instead
+of free-text names.
+
+**Fix (automatic):** The app detects this capability per-org and automatically
+normalizes address values to ISO codes.  If you still see the error, reconnect
+your Salesforce account so the capability cache refreshes.
 
 ---
 
