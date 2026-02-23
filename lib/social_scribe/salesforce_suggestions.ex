@@ -125,9 +125,7 @@ defmodule SocialScribe.SalesforceSuggestions do
       if default_country do
         Map.put(updates, "MailingCountry", default_country)
       else
-        Logger.warning(
-          "Skipping MailingState update because Salesforce requires MailingCountry"
-        )
+        Logger.warning("Skipping MailingState update because Salesforce requires MailingCountry")
 
         Map.delete(updates, "MailingState")
       end

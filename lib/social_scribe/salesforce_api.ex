@@ -174,9 +174,7 @@ defmodule SocialScribe.SalesforceApi do
         if address_field_not_found?(body) do
           false
         else
-          Logger.warning(
-            "Salesforce address capability check: unexpected 400 — #{inspect(body)}"
-          )
+          Logger.warning("Salesforce address capability check: unexpected 400 — #{inspect(body)}")
 
           false
         end
@@ -189,9 +187,7 @@ defmodule SocialScribe.SalesforceApi do
         false
 
       {:error, reason} ->
-        Logger.warning(
-          "Salesforce address capability check HTTP error: #{inspect(reason)}"
-        )
+        Logger.warning("Salesforce address capability check HTTP error: #{inspect(reason)}")
 
         false
     end
