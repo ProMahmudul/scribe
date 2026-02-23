@@ -50,6 +50,9 @@ config :ueberauth, Ueberauth.Strategy.Salesforce.OAuth,
   client_secret: System.get_env("SALESFORCE_CLIENT_SECRET"),
   site: System.get_env("SALESFORCE_SITE", "https://login.salesforce.com")
 
+config :social_scribe, :salesforce,
+  default_country: System.get_env("SALESFORCE_DEFAULT_COUNTRY") || "United States"
+
 if System.get_env("PHX_SERVER") do
   config :social_scribe, SocialScribeWeb.Endpoint, server: true
 end
