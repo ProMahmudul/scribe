@@ -38,6 +38,13 @@ defmodule SocialScribe.SalesforceApiBehaviour do
               updates :: map()
             ) :: {:ok, map()} | {:error, any()}
 
+  @doc """
+  Returns `true` if the Salesforce org has State/Country/Territory Picklists
+  enabled, meaning `MailingStateCode` and `MailingCountryCode` are valid
+  Contact fields.  The result is cached per org for ~1 hour.
+  """
+  @callback uses_address_code_fields?(credential :: UserCredential.t()) :: boolean()
+
   # Delegation helpers — call these from application code instead of the
   # behaviour module directly so the implementation is always resolved
   # from config.
@@ -52,6 +59,10 @@ defmodule SocialScribe.SalesforceApiBehaviour do
 
   def update_contact(credential, contact_id, updates) do
     impl().update_contact(credential, contact_id, updates)
+  end
+
+  def uses_address_code_fields?(credential) do
+    impl().uses_address_code_fields?(credential)
   end
 
   defp impl do

@@ -32,6 +32,9 @@ defmodule SocialScribe.SalesforceApi do
     MailingStreet MailingCity MailingState MailingPostalCode MailingCountry
   )
 
+  # ETS cache key prefix for address-code capability checks.
+  @cap_key_prefix "sf_address_code_fields"
+
   @doc """
   Searches Salesforce contacts whose Name contains `query` (case-insensitive).
   Uses a SOQL query with a LIKE filter; returns up to 10 results.
@@ -128,9 +131,77 @@ defmodule SocialScribe.SalesforceApi do
     end
   end
 
+  @doc """
+  Returns `true` if the Salesforce org has State/Country/Territory Picklists
+  enabled — i.e. `MailingStateCode` and `MailingCountryCode` are valid
+  Contact API fields.
+
+  The result is cached per org (keyed by `instance_url`) for ~1 hour to avoid
+  a redundant API round-trip on every contact update.
+  """
+  @impl SocialScribe.SalesforceApiBehaviour
+  def uses_address_code_fields?(%UserCredential{} = credential) do
+    instance_url = (credential.metadata || %{})["instance_url"] || ""
+    cache_key = {@cap_key_prefix, instance_url}
+
+    case SocialScribe.Salesforce.CapabilityCache.get(cache_key) do
+      {:ok, value} ->
+        value
+
+      :miss ->
+        value = fetch_address_code_support(credential)
+        SocialScribe.Salesforce.CapabilityCache.put(cache_key, value)
+        value
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Private helpers
   # ---------------------------------------------------------------------------
+
+  # Checks whether the org exposes MailingStateCode / MailingCountryCode by
+  # running a zero-row SOQL query.  A 200 response means the fields exist; a
+  # 400 with INVALID_FIELD means they don't (picklists not enabled).
+  defp fetch_address_code_support(%UserCredential{} = credential) do
+    soql = "SELECT MailingStateCode, MailingCountryCode FROM Contact LIMIT 0"
+    url = "/services/data/#{@api_version}/query?q=#{URI.encode(soql)}"
+
+    case Tesla.get(client(credential), url) do
+      {:ok, %Tesla.Env{status: 200}} ->
+        true
+
+      {:ok, %Tesla.Env{status: 400, body: body}} ->
+        if address_field_not_found?(body) do
+          false
+        else
+          Logger.warning(
+            "Salesforce address capability check: unexpected 400 — #{inspect(body)}"
+          )
+
+          false
+        end
+
+      {:ok, %Tesla.Env{status: status, body: body}} ->
+        Logger.warning(
+          "Salesforce address capability check: unexpected #{status} — #{inspect(body)}"
+        )
+
+        false
+
+      {:error, reason} ->
+        Logger.warning(
+          "Salesforce address capability check HTTP error: #{inspect(reason)}"
+        )
+
+        false
+    end
+  end
+
+  defp address_field_not_found?(body) when is_list(body) do
+    Enum.any?(body, &match?(%{"errorCode" => "INVALID_FIELD"}, &1))
+  end
+
+  defp address_field_not_found?(_), do: false
 
   # Build a Tesla client that targets the org-specific instance_url.
   # Every Salesforce org has its own subdomain, stored in credential metadata.
